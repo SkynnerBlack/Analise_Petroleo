@@ -1,17 +1,39 @@
-import pandas as pd
 import requests
+import pandas as pd
 
-def fetch_currency_data(currency_code, start_date, end_date):
-    url = f"https://ptax.bcb.gov.br/ptax_internet/consultaBoletim.do?method=gerarCSVFechamentoMoedaNoPeriodo&ChkMoeda={currency_code}&DATAINI={start_date}&DATAFIM={end_date}"
-    response = requests.get(url)
+import io
+
+def download_currency_data(currency_code: str, start_date: str, end_date: str) -> pd.DataFrame | None:
+
+    start_date = pd.to_datetime(start_date, format="%Y%m%d")
+    end_date = pd.to_datetime(end_date, format="%Y%m%d")
+
+    url = "https://ptax.bcb.gov.br/ptax_internet/consultaBoletim.do"
+    
+    payload = {
+        "method": "gerarCSVFechamentoMoedaNoPeriodo",
+        "ChkMoeda": currency_code,
+        "DATAINI": start_date.strftime("%d/%m/%Y"),
+        "DATAFIM": end_date.strftime("%d/%m/%Y")
+    }
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Referer": "https://ptax.bcb.gov.br/ptax_internet/consultaBoletim.do?method=exibirBoletim"
+    }
+    
+    response = requests.post(url, data=payload, headers=headers)
     
     if response.status_code == 200:
-        df = pd.read_csv(pd.compat.StringIO(response.text), sep=";", decimal=",")
-        return df
-    else:
-        print("Failed to fetch data")
-        return None
 
-# Example usage:
-df = fetch_currency_data("USD", "01/01/2023", "31/12/2023")
-print(df.head())
+        currency_data = pd.read_csv(
+            io.StringIO(response.text), 
+            sep=";", 
+            decimal=",",
+            usecols=[0, 4, 5],
+            header=None )
+        currency_data.columns = ["Date", "Sale Value", "Purchase Value"]
+        currency_data["Date"] = pd.to_datetime(currency_data["Date"], format="%d%m%Y").dt.strftime("%Y%m%d")
+        return currency_data
+
+currency_data = download_currency_data("61", "20240808", "20240809")
