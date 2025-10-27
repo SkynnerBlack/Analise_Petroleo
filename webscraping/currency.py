@@ -37,3 +37,14 @@ def download_currency_data(currency_code: str, start_date: str, end_date: str) -
         return currency_data
 
 currency_data = download_currency_data("61", "20240808", "20240809")
+
+# --- #
+
+currency_request = {
+        "currency_code": "61",
+        "start_date": "20240808",
+        "end_date": "20240809"
+        }
+
+
+
