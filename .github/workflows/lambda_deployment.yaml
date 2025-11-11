@@ -1,26 +1,46 @@
-name: Deploy Lambda Function
+name: Deploy Individual Lambdas
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main # or master
 
 jobs:
-  deploy:
+  deploy_individual_lambdas:
     runs-on: ubuntu-latest
-
+    
+    # 1. Define the deployment matrix (list of function names)
+    strategy:
+      matrix:
+        # Use the base name of your Python files
+        function_name: ["data_clustering"]
+        
+    # The deployment steps will run once for each item in the matrix
     steps:
-      - uses: actions/checkout@v2
-      - name: Install zip tool
-        uses: montudor/action-zip@v1
-      - name: Create Zip file for Lambda function
-        run: zip -r code.zip .
-      - name: AWS CLI v2
-        uses: imehedi/actions-awscli-v2@latest
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # 2. Configure AWS Credentials
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          args: "lambda update-function-code \
-            --function-name arn:aws:lambda:sa-east-1:873883317606:function:data_clustering \
-            --zip-file fileb://code.zip"
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: "sa-east-1"
+          # Use your stored GitHub Secrets
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: sa-east-1 
+
+      # 3. Create the function-specific ZIP package
+      - name: Package ${{ matrix.function_name }}.py
+        run: |
+          # This command ensures the .py file is at the root of the ZIP.
+          # We use the -j flag ("junk paths") to prevent the full directory structure 
+          # (src/webscraping/) from being included in the zip file.
+          # This makes the Lambda Handler simple (e.g., data_clustering.lambda_handler).
+          zip -j ${{ matrix.function_name }}.zip src/webscraping/${{ matrix.function_name }}.py
+          
+      # 4. Deploy to the specific Lambda function on AWS
+      - name: Deploy ${{ matrix.function_name }} Lambda
+        run: |
+          aws lambda update-function-code \
+            --function-name ${{ matrix.function_name }} \
+            --zip-file fileb://${{ matrix.function_name }}.zip

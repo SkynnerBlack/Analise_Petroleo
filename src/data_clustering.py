@@ -4,7 +4,7 @@ import pandas as pd
 from typing import Tuple
 from datetime import datetime
 
-# Testando Integração com a AWS
+# Testando Integração com a AWS V2
 
 # --- Configuration & Initialization ---
 dynamodb_table_name = 'MarketCommodityData'
