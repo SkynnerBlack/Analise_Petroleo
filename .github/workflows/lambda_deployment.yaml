@@ -34,9 +34,9 @@ jobs:
         run: |
           # This command ensures the .py file is at the root of the ZIP.
           # We use the -j flag ("junk paths") to prevent the full directory structure 
-          # (src/webscraping/) from being included in the zip file.
+          # (src/) from being included in the zip file.
           # This makes the Lambda Handler simple (e.g., data_clustering.lambda_handler).
-          zip -j ${{ matrix.function_name }}.zip src/webscraping/${{ matrix.function_name }}.py
+          zip -j ${{ matrix.function_name }}.zip src/${{ matrix.function_name }}.py
           
       # 4. Deploy to the specific Lambda function on AWS
       - name: Deploy ${{ matrix.function_name }} Lambda
