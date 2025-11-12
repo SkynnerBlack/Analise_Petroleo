@@ -1,9 +1,15 @@
+name: Deploy Individual Lambdas
+
+on:
+  push:
+    branches:
+      - main 
+
 jobs:
   deploy_individual_lambdas:
     runs-on: ubuntu-latest
-    
     permissions:
-      id-token: write # Permite que o workflow solicite um token OIDC
+      id-token: write
       contents: read
       
     strategy:
@@ -14,20 +20,16 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # Configurar credenciais OIDC (temporárias)
       - name: Configure AWS Credentials with OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          # ARN da Role que dá a permissão necessária
           role-to-assume: arn:aws:iam::873883317606:role/GitHubActionsDeployRole
           aws-region: sa-east-1 
           
-      # 3. Criação do ZIP
       - name: Package ${{ matrix.function_name }}.py
         run: |
           zip -j ${{ matrix.function_name }}.zip src/${{ matrix.function_name }}.py
           
-      # 4. Deploy da Lambda
       - name: Deploy ${{ matrix.function_name }} Lambda
         run: |
           aws lambda update-function-code \
