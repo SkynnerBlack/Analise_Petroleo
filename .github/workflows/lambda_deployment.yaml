@@ -1,44 +1,33 @@
-name: Deploy Individual Lambdas
-
-on:
-  push:
-    branches:
-      - main # or master
-
 jobs:
   deploy_individual_lambdas:
     runs-on: ubuntu-latest
     
-    # 1. Define the deployment matrix (list of function names)
+    permissions:
+      id-token: write # Permite que o workflow solicite um token OIDC
+      contents: read
+      
     strategy:
       matrix:
-        # Use the base name of your Python files
-        function_name: ["data_clustering"]
+        function_name: [data_clustering] 
         
-    # The deployment steps will run once for each item in the matrix
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 2. Configure AWS Credentials
-      - name: Configure AWS Credentials
+      # Configurar credenciais OIDC (temporárias)
+      - name: Configure AWS Credentials with OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          # Use your stored GitHub Secrets
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          # ARN da Role que dá a permissão necessária
+          role-to-assume: arn:aws:iam::873883317606:role/GitHubActionsDeployRole
           aws-region: sa-east-1 
-
-      # 3. Create the function-specific ZIP package
+          
+      # 3. Criação do ZIP
       - name: Package ${{ matrix.function_name }}.py
         run: |
-          # This command ensures the .py file is at the root of the ZIP.
-          # We use the -j flag ("junk paths") to prevent the full directory structure 
-          # (src/) from being included in the zip file.
-          # This makes the Lambda Handler simple (e.g., data_clustering.lambda_handler).
           zip -j ${{ matrix.function_name }}.zip src/${{ matrix.function_name }}.py
           
-      # 4. Deploy to the specific Lambda function on AWS
+      # 4. Deploy da Lambda
       - name: Deploy ${{ matrix.function_name }} Lambda
         run: |
           aws lambda update-function-code \
