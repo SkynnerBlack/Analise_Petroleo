@@ -17,7 +17,8 @@ partitions = {
 }
 
 start_date = '2023-01-01'
-end_date = datetime.now().strftime('%Y-%m-%d')
+end_date = '2023-01-31'
+# end_date = datetime.now().strftime('%Y-%m-%d')
 
 # --- Boto3 Initialization ---
 
@@ -43,7 +44,7 @@ def _get_date_range_list(date_range: Tuple[str, str]) -> list[str]:
     except Exception as e:
         raise(f"Error generating date range: {e}")
     
-def _check_missing_dates(partition_key: str, date_range: Tuple[str, str]) -> list[str]:
+def _check_missing_dates(partition_key: str, date_range: Tuple[str, str], expected_dates: list) -> list[str]:
     """Checks for dates that were supposed to be recorded but are missing in DynamoDB."""
 
     start_date, end_date = date_range
@@ -53,13 +54,15 @@ def _check_missing_dates(partition_key: str, date_range: Tuple[str, str]) -> lis
         '#dt': 'date'
     }
 
-    key_condition_expression = "#pk = :pk_value AND #dt BETWEEN :start_dt AND :end_dt"
-
     expression_attribute_values = {
         ':pk_value': partition_key,
         ':start_dt': start_date,
         ':end_dt': end_date
     }
+
+    key_condition_expression = "#pk = :pk_value AND #dt BETWEEN :start_dt AND :end_dt"
+
+    
 
     query_params = {
         'KeyConditionExpression': key_condition_expression, # PK memory alocation condition
@@ -71,25 +74,53 @@ def _check_missing_dates(partition_key: str, date_range: Tuple[str, str]) -> lis
     
     recorded_dates_set = [item.get('date') for item in response.get('Items', [])]
 
-    expected_dates = _get_date_range_list((start_date, end_date))
-
     missing_dates = [date for date in expected_dates if date not in recorded_dates_set]
     
     return missing_dates
 
-def _check_nonexisting_values(partition_key, date_range: list[str]) -> list[str]:
-    '''Rechecks for dates that do not have any recorded value in the source
-    
-    Max trying time is defined by RETRY_LIMIT
+def _check_nonexisting_values(partition_key: str, missing_dates: list, date_range: list[str], expected_dates: list, retry_limit: int) -> list[str]:
+    '''Rechecks for dates that are recorder as None on the dataframe, because of inexisting on the source.
+
+    Max trying time is defined by retry_limit
     '''
 
+    checkable_dates = [d for d in expected_dates if d not in missing_dates]
+
+    expression_attribute_names = {
+        '#pk': 'info_type',
+        '#dt': 'date'
+    }
+
+
+    # Preciso melhorar a performance dessa consulta para que não estoure o número de requisições na AWS
+    for check_date in checkable_dates:
+
+        key_condition_expression = "#pk = :pk_value AND #dt = :check_dt"
+
+        expression_attribute_values = {
+            ':pk_value': partition_key,
+            ':check_dt': check_date
+    }
+
+        query_params = {
+            'KeyConditionExpression': key_condition_expression, # PK memory alocation condition
+            'ExpressionAttributeNames': expression_attribute_names, # Atribute name declaration
+            'ExpressionAttributeValues': {**expression_attribute_values} # Atribute value declaration
+        }
+        
+        response = table.query(**query_params)
+    
+    recorded_dates_set = [item.get('date') for item in response.get('Items', [])]
+
 def lambda_handler(event, context):
+    
+    expected_dates = _get_date_range_list((start_date, end_date))
      
-     for info in partitions:
+    for info in partitions:
         for partition_key in partitions[info]:
              
-             retrievable_dates = _check_missing_dates(partition_key, (start_date, end_date))
+             missing_dates = _check_missing_dates(partition_key, (start_date, end_date), expected_dates)
 
-             retrievable_dates = _check_nonexisting_values(partition_key, retry_limit, (start_date, end_date))
+             nonexisting_dates = _check_nonexisting_values(partition_key, missing_dates, (start_date, end_date), expected_dates, retry_limit)
 
 lambda_handler('teste', 'teste')
