@@ -18,7 +18,7 @@ partitions = {
 }
 
 start_date = '2023-01-01'
-end_date = '2023-01-31'
+end_date = '2023-02-28'
 # end_date = datetime.now().strftime('%Y-%m-%d')
 
 # --- Boto3 Initialization ---
@@ -140,7 +140,14 @@ def lambda_handler(event, context):
 
             downloadable_dates = sorted(missing_dates + nullvalue_dates)
 
-            if downloadable_dates:
-                send_to_sqs(sqs_queue_name, partition_key, downloadable_dates)
+            max_sqs_batch = 30
+
+            # Send dates to SQS in batches to avoid exceeding limits
+            for i in range(0, len(downloadable_dates), max_sqs_batch):
+                batch = downloadable_dates[i:i + max_sqs_batch]
+                if batch:
+                    send_to_sqs(sqs_queue_name, partition_key, batch)
+
+            print('teste')
 
 lambda_handler('teste', 'teste')
