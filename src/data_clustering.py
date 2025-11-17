@@ -8,6 +8,7 @@ from datetime import datetime
 
 # --- Configuration & Initialization ---
 dynamodb_table_name = 'MarketCommodityData'
+sqs_queue_name = 'download_queue'
 region_name = 'sa-east-1'
 retry_limit = 5
 
@@ -28,6 +29,11 @@ try:
 except Exception as e:
     raise(f"Error initializing DynamoDB: {e}")
 
+try:
+    sqs_client = boto3.client('sqs', region_name)
+except Exception as e:
+    print(f"Error initializing SQS: {e}")
+
 def _get_date_range_list(date_range: Tuple[str, str]) -> list[str]:
     """Generates a list of expected dates (YYYY-MM-DD) from start_date to today."""
     
@@ -43,7 +49,7 @@ def _get_date_range_list(date_range: Tuple[str, str]) -> list[str]:
         
     except Exception as e:
         raise(f"Error generating date range: {e}")
-    
+
 def _check_missing_dates(partition_key: str, date_range: Tuple[str, str], expected_dates: list) -> list[str]:
     """Checks for dates that were supposed to be recorded but are missing in DynamoDB."""
 
@@ -91,12 +97,36 @@ def _check_nonexisting_values(selected_dataset: dict, retry_limit: int) -> list[
 
         if value is None:
             retry_count = item.get('retry_count', 0)
-
+            
             if retry_count < retry_limit:
                 nullvalue_dates.append(date)
 
     return nullvalue_dates
+
+def send_to_sqs(queue_name, partition_key: str, downloadable_dates: list[str]):
+    """Sends a message to the specified SQS queue with the partition key and list of dates to download."""
+
+    response = sqs_client.get_queue_url(
+        QueueName=queue_name
+    )
     
+    queue_url = response['QueueUrl']
+
+    # Constrói o dicionário de mensagem
+    queue_message = {
+        'partition_key': partition_key,
+        'dates_to_download': downloadable_dates
+    }
+
+    # Serializa o dicionário em uma string JSON
+    message_body_json = json.dumps(queue_message)
+
+    # Envia a mensagem
+    response = sqs_client.send_message(
+        QueueUrl=queue_url,
+        MessageBody=message_body_json,
+    )
+
 def lambda_handler(event, context):
     
     expected_dates = _get_date_range_list((start_date, end_date))
@@ -104,10 +134,13 @@ def lambda_handler(event, context):
     for info in partitions:
         for partition_key in partitions[info]:
              
-             selected_dataset, missing_dates = _check_missing_dates(partition_key, (start_date, end_date), expected_dates)
+            selected_dataset, missing_dates = _check_missing_dates(partition_key, (start_date, end_date), expected_dates)
 
-             nullvalue_dates = _check_nonexisting_values(selected_dataset, retry_limit)
+            nullvalue_dates = _check_nonexisting_values(selected_dataset, retry_limit)
 
-             downloadable_dates = sorted(missing_dates + nullvalue_dates)
+            downloadable_dates = sorted(missing_dates + nullvalue_dates)
+
+            if downloadable_dates:
+                send_to_sqs(sqs_queue_name, partition_key, downloadable_dates)
 
 lambda_handler('teste', 'teste')
