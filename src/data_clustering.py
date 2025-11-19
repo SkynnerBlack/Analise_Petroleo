@@ -4,8 +4,6 @@ import pandas as pd
 from typing import Tuple
 from datetime import datetime
 
-# Testando Integração com a AWS V3
-
 # --- Configuration & Initialization ---
 dynamodb_table_name = 'MarketCommodityData'
 sqs_queue_name = 'download_queue'
@@ -147,7 +145,3 @@ def lambda_handler(event, context):
                 batch = downloadable_dates[i:i + max_sqs_batch]
                 if batch:
                     send_to_sqs(sqs_queue_name, partition_key, batch)
-
-            print('teste')
-
-lambda_handler('teste', 'teste')
