@@ -14,7 +14,7 @@ jobs:
       
     strategy:
       matrix:
-        function_name: [data_clustering] 
+        function_name: [data_clustering, scraper] 
         
     steps:
       - name: Checkout Code
