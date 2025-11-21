@@ -8,11 +8,11 @@ from datetime import datetime
 dynamodb_table_name = 'MarketCommodityData'
 sqs_queue_name = 'download_queue'
 region_name = 'sa-east-1'
+max_sqs_batch = 30
 retry_limit = 5
 
 partitions = {
-    'CURRENCY': ('CURRENCY#USD', 'CURRENCY#BRL', 'CURRENCY#SAR'),
-    'FUEL': ('FUEL#GASOLINE', 'FUEL#DIESEL', 'FUEL#ETHANOL', 'FUEL#LPG'),
+    'CURRENCY': ('CURRENCY#USD', 'CURRENCY#BRL', 'CURRENCY#SAR')
 }
 
 start_date = '2023-01-01'
@@ -48,7 +48,7 @@ def _get_date_range_list(date_range: Tuple[str, str]) -> list[str]:
     except Exception as e:
         raise(f"Error generating date range: {e}")
 
-def _check_missing_dates(partition_key: str, date_range: Tuple[str, str], expected_dates: list) -> list[str]:
+def _return_checkable_dates(partition_key: str, date_range: Tuple[str, str]) -> list[dict]:
     """Checks for dates that were supposed to be recorded but are missing in DynamoDB."""
 
     start_date, end_date = date_range
@@ -72,32 +72,40 @@ def _check_missing_dates(partition_key: str, date_range: Tuple[str, str], expect
         'ExpressionAttributeValues': {**expression_attribute_values} # Atribute value declaration
     }
     
-    response = table.query(**query_params)
-    
-    selected_dataset = response['Items']
+    try: 
+        response = table.query(**query_params)
+    except Exception as e:
+        raise(f"Error querying DynamoDB: {e}")
 
-    recorded_datesset = [item.get('date') for item in response.get('Items', [])]
-    missing_dates = [date for date in expected_dates if date not in recorded_datesset]
+    recorded_dates = response['Items']
     
-    return selected_dataset, missing_dates
+    return recorded_dates
 
-def _check_nonexisting_values(selected_dataset: dict, retry_limit: int) -> list[str]:
+def _check_missing_dates(recorded_dates: list[dict], expected_dates: list[str]) -> list[str]:
+    '''Compares expected dates with checkable dates to find missing ones.'''
+
+    recorded = {item['date'] for item in recorded_dates}
+    missing_dates = [date for date in expected_dates if date not in recorded]
+
+    return missing_dates
+
+def _check_nullvalue_values(recorded_dates: list[dict], missing_dates: list[str], retry_limit: int) -> list[str]:
     '''Rechecks for dates that are recorder as Null on the dataset, because of inexisting on the source.
 
     Max trying time is defined by retry_limit
     '''
-
     nullvalue_dates = []
+    
+    for item in recorded_dates:
+        if item['date'] not in missing_dates:
+            date = item.get('date')
+            value = item.get('value')
 
-    for item in selected_dataset:
-        date = item.get('date')
-        value = item.get('value')
-
-        if value is None:
-            retry_count = item.get('retry_count', 0)
-            
-            if retry_count < retry_limit:
-                nullvalue_dates.append(date)
+            if value is None:
+                retry_count = item.get('retry_count', 0)
+                
+                if retry_count < retry_limit:
+                    nullvalue_dates.append(date)
 
     return nullvalue_dates
 
@@ -110,20 +118,24 @@ def send_to_sqs(queue_name, partition_key: str, downloadable_dates: list[str]):
     
     queue_url = response['QueueUrl']
 
-    # Constrói o dicionário de mensagem
+    # Builds the message body
     queue_message = {
         'partition_key': partition_key,
         'dates_to_download': downloadable_dates
     }
 
-    # Serializa o dicionário em uma string JSON
+    # Converts the message body to JSON
     message_body_json = json.dumps(queue_message)
 
-    # Envia a mensagem
-    response = sqs_client.send_message(
-        QueueUrl=queue_url,
-        MessageBody=message_body_json,
-    )
+    try:
+        # Sends the message to the SQS queue
+        response = sqs_client.send_message(
+            QueueUrl=queue_url,
+            MessageBody=message_body_json,
+        )
+
+    except Exception as e:
+        raise(f"Error sending message to SQS: {e}")
 
 def lambda_handler(event, context):
     
@@ -132,13 +144,13 @@ def lambda_handler(event, context):
     for info in partitions:
         for partition_key in partitions[info]:
              
-            selected_dataset, missing_dates = _check_missing_dates(partition_key, (start_date, end_date), expected_dates)
+            recorded_dates = _return_checkable_dates(partition_key, (start_date, end_date))
 
-            nullvalue_dates = _check_nonexisting_values(selected_dataset, retry_limit)
+            missing_dates = _check_missing_dates(recorded_dates, expected_dates)
+
+            nullvalue_dates = _check_nullvalue_values(recorded_dates, missing_dates, retry_limit)
 
             downloadable_dates = sorted(missing_dates + nullvalue_dates)
-
-            max_sqs_batch = 30
 
             # Send dates to SQS in batches to avoid exceeding limits
             for i in range(0, len(downloadable_dates), max_sqs_batch):
