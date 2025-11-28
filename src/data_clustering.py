@@ -8,8 +8,7 @@ from datetime import datetime
 dynamodb_table_name = 'MarketCommodityData'
 sqs_queue_name = 'download_queue'
 region_name = 'sa-east-1'
-max_sqs_batch = 30
-retry_limit = 5
+max_sqs_batch = 25
 
 partitions = {
     'CURRENCY': ('CURRENCY#USD', 'CURRENCY#BRL', 'CURRENCY#SAR')
@@ -89,27 +88,36 @@ def _check_missing_dates(recorded_dates: list[dict], expected_dates: list[str]) 
 
     return missing_dates
 
-def _check_nullvalue_values(recorded_dates: list[dict], missing_dates: list[str], retry_limit: int) -> list[str]:
-    '''Rechecks for dates that are recorder as Null on the dataset, because of inexisting on the source.
-
-    Max trying time is defined by retry_limit
-    '''
-    nullvalue_dates = []
+def _find_date_streams(dates_to_download: list[str], expected_dates: list[str]) -> list[str]:
+    """Identifies continuous date streams in the list, splitting at gaps."""
     
-    for item in recorded_dates:
-        if item['date'] not in missing_dates:
-            date = item.get('date')
-            value = item.get('value')
+    gaps = [date for date in expected_dates if date not in dates_to_download]
 
-            if value is None:
-                retry_count = item.get('retry_count', 0)
+    streams = []
+
+    if gaps:
+
+        
+        temp_stream = []
+
+        for date in expected_dates:
+            if date in gaps: # Found a gap
+                if temp_stream:
+                    streams.append(temp_stream) # Close current stream
+                temp_stream = [] # Start a new stream
                 
-                if retry_count < retry_limit:
-                    nullvalue_dates.append(date)
+            else: # Date is present
+                temp_stream.append(date)
+                
+        if temp_stream: # Append any remaining dates
+            streams.append(temp_stream)
+    
+    else:
+        streams.append(dates_to_download)
+        
+    return streams
 
-    return nullvalue_dates
-
-def send_to_sqs(queue_name, partition_key: str, downloadable_dates: list[str]):
+def send_to_sqs(queue_name, partition_key: str, batch: tuple[str]):
     """Sends a message to the specified SQS queue with the partition key and list of dates to download."""
 
     response = sqs_client.get_queue_url(
@@ -121,7 +129,7 @@ def send_to_sqs(queue_name, partition_key: str, downloadable_dates: list[str]):
     # Builds the message body
     queue_message = {
         'partition_key': partition_key,
-        'dates_to_download': downloadable_dates
+        'dates_to_download': batch
     }
 
     # Converts the message body to JSON
@@ -148,14 +156,12 @@ def lambda_handler(event, context):
 
             missing_dates = _check_missing_dates(recorded_dates, expected_dates)
 
-            nullvalue_dates = _check_nullvalue_values(recorded_dates, missing_dates, retry_limit)
-
-            downloadable_dates = sorted(missing_dates + nullvalue_dates)
+            streams = _find_date_streams(missing_dates, expected_dates)
 
             # Send dates to SQS in batches to avoid exceeding limits
-            for i in range(0, len(downloadable_dates), max_sqs_batch):
-                batch = downloadable_dates[i:i + max_sqs_batch]
-                if batch:
-                    send_to_sqs(sqs_queue_name, partition_key, batch)
+            for stream in streams:
+                stream_copy = stream[:] # Copying to avoid slicing
 
-lambda_handler(None, None)
+                for i in range(0, len(stream_copy), max_sqs_batch):
+                    batch = stream_copy[i:i + max_sqs_batch]
+                    send_to_sqs(sqs_queue_name, partition_key, batch)
