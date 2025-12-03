@@ -1,126 +1,187 @@
-# 📊 Data Pipeline Serverless com Clusterização, Retry Inteligente e Testes Profissionais
+# 📊 Serverless Data Pipeline with Clustering, Intelligent Retry & Production-Grade Testing
 
-Este projeto implementa um **data pipeline serverless em AWS**, totalmente desacoplado e orientado a eventos, com foco em **alta disponibilidade, eficiência de custo, resiliência a falhas e testabilidade profissional**.  
-Ele resolve automaticamente problemas de **gaps de dados**, **falhas de integração com APIs externas** e **reprocessamento controlado** via filas.
+This project implements a **fully serverless, event-driven data pipeline on AWS**, designed for **high availability, cost efficiency, fault tolerance, and professional-grade testability**.  
+It automatically handles **data gaps**, **external API failures**, and **controlled reprocessing** through message queues.
 
----
+In addition to the main pipeline, the architecture includes a **specialized Lambda function dedicated exclusively to rechecking the database and triggering controlled re-downloads** of missing or invalid data. This separation was a **deliberate design choice to reduce system complexity and improve long-term maintainability**.
 
-## 🚀 Tecnologias e Habilidades
-
-| Categoria        | Tecnologia                  | Habilidade Demonstrada                                                                  |
-|------------------|-----------------------------|-----------------------------------------------------------------------------------------|
-| Arquitetura      | AWS Lambda, SQS             | Orquestração de workflows assíncronos e desacoplados                                    |
-| Banco de Dados   | Amazon DynamoDB             | Modelagem NoSQL Single-Table, otimização de consultas e mitigação de *Hot Partitions*   |
-| Análise/Dados    | Python, Pandas              | Manipulação de Séries Temporais e análise de gaps                                       |
-| Testes           | Pytest, unittest.mock      | Isolamento de código e simulação de serviços AWS (*Mocking*)                             |
-| Infra/Segurança  | IAM, Variáveis de Ambiente | Princípio do Mínimo Privilégio e portabilidade entre ambientes                           |
+The repository also features a **fully automated CI/CD deployment system using OIDC (OpenID Connect)** instead of static AWS secret keys, ensuring **high security even with a public repository**.
 
 ---
 
-## 📐 Abstrações e Padrões de Design
+## 🔐 Secure CI/CD with OIDC (No Secret Keys)
 
-O projeto aplica padrões consagrados de **engenharia de dados para ambientes de alto volume**.
+This project uses **GitHub Actions with OIDC authentication** to deploy Lambda functions securely to AWS:
 
-### 1. Modelagem Otimizada (Single-Table Design)
+- **No AWS access keys are stored in the repository**
+- GitHub Actions assumes an **AWS IAM Role via OIDC**
+- The deployment is **short-lived, scoped, and auditable**
+- Safe for **fully public repositories**
 
-- **Chave Primária Composta**  
-  Uso de *Partition Key* (`info_type`) para agrupar dados por ativo (`CURRENCY#USD`, `CURRENCY#BRL`, `FUEL#DISEL` etc)  
-  e *Sort Key* (`date`) para permitir consultas eficientes por intervalo de tempo.
+### Automated Lambda Sync
 
-- **Otimização de I/O**  
-  Toda a leitura é feita via **uma única `Query` altamente restritiva por PK**, seguindo as boas práticas do DynamoDB.  
-  Filtros adicionais são processados **em memória (Python)**, evitando múltiplas chamadas de rede.
+- Each Lambda function in AWS is **automatically matched to a directory in the repository**
+- The **GitHub Actions YAML workflow**:
+  - Detects changes in the repo
+  - Packages the code
+  - Deploys each function to the **Lambda with the same name**
+- This ensures:
+  - Zero manual deployments
+  - Full traceability
+  - Reproducible infrastructure behavior
+  - Production-ready DevOps workflow
 
----
-
-### 2. Otimização de Fluxo de Trabalho e Batching
-
-O sistema de orquestração de downloads é otimizado para a **natureza das APIs externas** e para a **eficiência de escrita no DynamoDB**.
-
-- **Separação por Streams Contínuos**  
-  As datas a serem processadas são agrupadas em **sequências contínuas de dias (*streams*)**, em vez de requisições isoladas por data.
-
-- **Motivação Técnica**  
-  Muitas APIs financeiras (ex.: Banco Central) oferecem melhor desempenho quando recebem **intervalos contínuos de datas** (`data_inicial` → `data_final`) em uma única chamada.  
-  Esse agrupamento:
-  - Reduz o número total de requisições
-  - Minimiza latência de rede
-  - Diminui o risco de *throttling*
-
-- **Batching para Inserção no DynamoDB**  
-  Cada *stream* contínuo é dividido em **lotes de até 25 itens**, aproveitando o limite máximo da operação `BatchWriteItem`.
-
-  Benefícios:
-  - Maximiza o throughput de escrita
-  - Reduz drasticamente a latência total
-  - Diminui o custo operacional em comparação a múltiplos `PutItem` individuais
+This approach follows **cloud security best practices** and eliminates the risks of credential leakage.
 
 ---
 
-## ⚙️ Arquitetura do Data Pipeline (Clusterização)
+## 🚀 Technologies & Skills
 
-O pipeline é **completamente desacoplado** em dois estágios via **Amazon SQS**.
+| Category          | Technology                     | Demonstrated Skill                                                                 |
+|-------------------|--------------------------------|-------------------------------------------------------------------------------------|
+| Architecture      | AWS Lambda, SQS                | Orchestration of asynchronous, decoupled workflows                                 |
+| Database          | Amazon DynamoDB                | NoSQL Single-Table Design, query optimization, and *Hot Partition* mitigation      |
+| Data & Analysis   | Python, Pandas                 | Time-series manipulation and gap analysis                                          |
+| Testing           | Pytest, unittest.mock          | Code isolation and AWS service simulation (*Mocking*)                               |
+| Infra & Security  | IAM, OIDC, Environment Vars   | Least Privilege, secure CI/CD, and environment portability                         |
+| DevOps            | GitHub Actions                | Automated build, test, and deployment pipelines                                    |
+
+---
+
+## 📐 Abstractions & Design Patterns
+
+The project applies **established data engineering patterns for high-throughput environments**.
+
+### 1. Optimized Data Modeling (Single-Table Design)
+
+- **Composite Primary Key**  
+  Use of *Partition Key* (`info_type`) to group data by asset  
+  (e.g., `CURRENCY#USD`, `CURRENCY#BRL`, `FUEL#DIESEL`)  
+  and *Sort Key* (`date`) to enable efficient time-range queries.
+
+- **I/O Optimization**  
+  All reads are executed through **a single highly selective `Query` per PK**, following DynamoDB best practices.  
+  Additional filters are processed **in-memory (Python)**, avoiding multiple network calls.
+
+---
+
+### 2. Workflow Optimization & Batching
+
+The download orchestration system is optimized for **external API behavior** and **DynamoDB write efficiency**.
+
+- **Continuous Stream Grouping**  
+  Dates to be processed are grouped into **continuous sequences (*streams*)** rather than isolated date requests.
+
+- **Technical Motivation**  
+  Many financial APIs (e.g., Central Bank APIs) perform better when receiving **continuous date ranges**  
+  (`start_date` → `end_date`) in a single request.  
+  This approach:
+  - Reduces the total number of requests  
+  - Minimizes network latency  
+  - Decreases the risk of *throttling*
+
+- **DynamoDB Batch Writes**  
+  Each continuous stream is split into **batches of up to 25 items**, leveraging the `BatchWriteItem` limit.
+
+  Benefits:
+  - Maximizes write throughput  
+  - Drastically reduces total latency  
+  - Lowers operational cost compared to multiple individual `PutItem` calls
+
+---
+
+## ⚙️ Data Pipeline Architecture (Clustering + Controlled Retry)
+
+The pipeline is **fully decoupled** into specialized stages using **Amazon SQS** and dedicated Lambda functions.
 
 ### 1. Orchestrator Lambda (`data_clustering`)
 
-- **Função:** Executa periodicamente via agendamento.
-- **Responsabilidades:**
-  - Consulta otimizada no DynamoDB
-  - Identificação de Gaps 
-- **Saída:**  
-  Envio da `partition_key` e da lista de `dates_to_download` para a fila SQS.
+- **Trigger:** Scheduled execution.
+- **Responsibilities:**
+  - Optimized queries on DynamoDB  
+  - Detection of missing data (*gaps*)  
+- **Output:**  
+  Sends `partition_key` and the list of `dates_to_download` to the SQS queue.
 
 ---
 
-### 2. Scraper Worker Lambda ('scraper')
+### 2. Scraper Worker Lambda (`scraper`)
 
-- **Função:** Processa mensagens da fila SQS.
-- **Responsabilidades:**
-  - Deserialização do payload
-  - Chamada à fonte externa (scraping)
-  - Persistência final via `PutItem` no DynamoDB
+- **Trigger:** SQS message consumption.
+- **Responsibilities:**
+  - Payload deserialization  
+  - External data source request (scraping)  
+  - Final persistence via `PutItem` in DynamoDB  
 
-Esse modelo garante:
-- Escalabilidade horizontal automática
-- Isolamento de falhas
-- Alta resiliência a picos de carga
+This model ensures:
+- Automatic horizontal scalability  
+- Fault isolation  
+- High resilience under load spikes
 
 ---
 
-## 💻 Testes Profissionais e Isolamento
+### 3. Specialized Recheck & Retry Lambda (`retry_recheck`)
 
-O projeto está sendo desenvolvido com **testabilidade como requisito arquitetural**.
+To handle persistent data issues without overloading the main pipeline, the architecture includes a **dedicated Lambda function exclusively responsible for controlled reprocessing**.
 
-### Injeção de Dependências
+- **Purpose:**  
+  Periodically re-scan the database to identify records with **`null` values or incomplete fields**.
 
-Os clientes AWS (`table`, `sqs_client`) são injetados nas funções, permitindo que o **ambiente de teste substitua completamente os serviços reais da AWS**.
+- **Retry Control:**  
+  Each record contains a `retry_count` attribute.  
+  - The function **re-enqueues the item for re-download only if `retry_count < 5`**  
+  - After each failed attempt, `retry_count` is incremented  
+  - Once the limit is reached, the record is **quarantined for manual inspection**
 
-### Mocking de Serviços
+- **Architectural Rationale:**  
+  This logic was intentionally **separated from the main pipeline** to:
+  - Reduce cognitive and operational complexity  
+  - Prevent infinite retry loops  
+  - Improve debuggability and observability  
+  - Make the core ingestion pipeline simpler and more reliable
 
-Utiliza:
+This design introduces **bounded, auditable, and safe retries**, aligned with production-grade data engineering practices.
+
+---
+
+## 💻 Production-Grade Testing & Isolation
+
+The project is designed with **testability as a core architectural requirement**.
+
+### Dependency Injection
+
+AWS clients (`table`, `sqs_client`) are injected into functions, allowing the **test environment to fully replace real AWS services**.
+
+### AWS Service Mocking
+
+Uses:
 - `unittest.mock`
 - `pytest`
 
-Com isso, é possível:
-- Simular respostas do DynamoDB
-- Simular envios ao SQS
-- Validar a lógica de *retry* e *gap detection*
-- Executar testes de forma **rápida, isolada e sem custo de nuvem**
+This enables:
+- Simulation of DynamoDB responses  
+- Simulation of SQS message publishing  
+- Validation of *retry logic* and *gap detection*
+- Fast, isolated tests with **zero cloud cost**
 
 ---
 
-## ✅ Principais Benefícios da Arquitetura
+## ✅ Key Architectural Benefits
 
-- Totalmente **serverless**
-- **Baixo acoplamento** entre componentes
-- **Alta escalabilidade**
-- **Tolerância a falhas**
-- **Custo otimizado**
-- **Testes automatizados sem dependência de cloud real**
+- Fully **serverless**
+- **Loosely coupled** components
+- **High scalability**
+- **Fault tolerant**
+- **Cost optimized**
+- **Automated testing without real cloud dependencies**
+- **Bounded and auditable retry mechanism**
+- **Secure CI/CD via OIDC (no static credentials)**
+- **Automatic Lambda deployment from GitHub**
+- **Improved maintainability via functional separation**
 
 ---
 
-## 👨‍💻 Autor
+## 👨‍💻 Author
 
-Projeto desenvolvido por **Gabriel**  
-Foco em **Engenharia de Dados Serverless, Arquiteturas Escaláveis e Boas Práticas Profissionais de Teste**.
+Project developed by **Gabriel**  
+Focused on **Serverless Data Engineering, Scalable Architectures, Secure CI/CD, and Professional Testing Best Practices**
