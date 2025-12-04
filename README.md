@@ -1,50 +1,89 @@
-# 📊 Serverless Data Pipeline with Clustering, Intelligent Retry & Production-Grade Testing
+# 📊 Serverless Data Pipeline with Clustering, Intelligent Retry & Production-Grade Testing with dashboard data panel (end-to-end solution)
 
 This project implements a **fully serverless, event-driven data pipeline on AWS**, designed for **high availability, cost efficiency, fault tolerance, and professional-grade testability**.  
 It automatically handles **data gaps**, **external API failures**, and **controlled reprocessing** through message queues.
 
+The main purpose here is to create a production grade analysis in real time of the relations between the stock values of different oil companies, the value of different currencies around the world and how it affects the prices of the fuels in Brazil, considering Ethanol, Gasoline, Diesel and LPG.
+
+To make a production level structure, we have to create strong data pipeline, considering aspects as security, reliability, fault-tolerance. In addition, we must create analysis that can offer insights to the people that will use it.
+
+Because of that, We are going to have a pipeline that is able to scrap the data from different sources in the internet, treat it with personalized conditions depending on which data it is importing and keep it on the DynamoDB to be shown on our dataviz. 
+
 In addition to the main pipeline, the architecture includes a **specialized Lambda function dedicated exclusively to rechecking the database and triggering controlled re-downloads** of missing or invalid data. This separation was a **deliberate design choice to reduce system complexity and improve long-term maintainability**.
 
-The repository also features a **fully automated CI/CD deployment system using OIDC (OpenID Connect)** instead of static AWS secret keys, ensuring **high security even with a public repository**.
+The pipeline was fully constructed to deal with batch writes on the DynamoDB, importing streams of 25 rows of data per web scraping at it's peak, preventing increasing efficiency. The repository also features a **fully automated CI/CD deployment system using OIDC (OpenID Connect)** instead of static AWS secret keys, ensuring **high security even with a public repository**.
 
 ---
 
-## 🔐 Secure CI/CD with OIDC (No Secret Keys)
+## Highlights 
 
-This project uses **GitHub Actions with OIDC authentication** to deploy Lambda functions securely to AWS:
-
-- **No AWS access keys are stored in the repository**
-- GitHub Actions assumes an **AWS IAM Role via OIDC**
-- The deployment is **short-lived, scoped, and auditable**
-- Safe for **fully public repositories**
-
-### Automated Lambda Sync
-
-- Each Lambda function in AWS is **automatically matched to a directory in the repository**
-- The **GitHub Actions YAML workflow**:
-  - Detects changes in the repo
-  - Packages the code
-  - Deploys each function to the **Lambda with the same name**
-- This ensures:
-  - Zero manual deployments
-  - Full traceability
-  - Reproducible infrastructure behavior
-  - Production-ready DevOps workflow
-
-This approach follows **cloud security best practices** and eliminates the risks of credential leakage.
+- 🔐 Secure CI/CD with OIDC (No Secret Keys)
+- 🎲 Workflow Optimization & Batching (On development 🚧)
+- 🔄️ Specialized Recheck & Retry Lambda (On development 🚧)
+- 🧪 Production-Grade Testing & Isolation (On development 🚧)
+- 📈 Dashboard dataviz (On development 🚧)
 
 ---
 
 ## 🚀 Technologies & Skills
 
-| Category          | Technology                     | Demonstrated Skill                                                                 |
+| Category          | Technology                     | Demonstrated Skill                                                                  |
 |-------------------|--------------------------------|-------------------------------------------------------------------------------------|
-| Architecture      | AWS Lambda, SQS                | Orchestration of asynchronous, decoupled workflows                                 |
-| Database          | Amazon DynamoDB                | NoSQL Single-Table Design, query optimization, and *Hot Partition* mitigation      |
-| Data & Analysis   | Python, Pandas                 | Time-series manipulation and gap analysis                                          |
+| Architecture      | AWS Lambda, SQS                | Orchestration of asynchronous, decoupled workflows                                  |
+| Database          | Amazon DynamoDB                | NoSQL Single-Table Design, query optimization, and *Hot Partition* mitigation       |
+| Data & Analysis   | Python, Pandas                 | Time-series manipulation and gap analysis                                           |
 | Testing           | Pytest, unittest.mock          | Code isolation and AWS service simulation (*Mocking*)                               |
-| Infra & Security  | IAM, OIDC, Environment Vars   | Least Privilege, secure CI/CD, and environment portability                         |
-| DevOps            | GitHub Actions                | Automated build, test, and deployment pipelines                                    |
+| Infra & Security  | IAM, OIDC, Environment Vars    | Least Privilege, secure CI/CD, and environment portability                          |
+| DevOps            | GitHub Actions                 | Automated build, test, and deployment pipelines          
+
+---
+
+## ⚙️ Data Pipeline Architecture
+
+The pipeline is **fully decoupled** into specialized stages using **Amazon SQS** and dedicated Lambda functions.
+
+### 1. Orchestrator Lambda (`data_clustering`)
+
+- **Trigger:** Scheduled execution.
+- **Responsibilities:**
+  - Optimized queries on DynamoDB  
+  - Detection of missing data (*gaps*)  
+- **Output:**  
+  Sends `partition_key` and the list of `dates_to_download` to the SQS queue.
+
+---
+
+### 2. Scraper Worker Lambda (`scraper`)
+
+- **Trigger:** SQS message consumption.
+- **Responsibilities:**
+  - Payload deserialization  
+  - External data source request (scraping)  
+  - Final persistence via `PutItem` in DynamoDB
+
+---
+
+### 3. Specialized Recheck & Retry Lambda (`retry_recheck`)
+
+To handle persistent data issues without overloading the main pipeline, the architecture includes a **dedicated Lambda function exclusively responsible for controlled reprocessing**.
+
+- **Purpose:**  
+  Periodically re-scan the database to identify records with **`null` values or incomplete fields**.
+
+- **Retry Control:**  
+  Each "null value" record contains a `retry_count` attribute.  
+  - The function **re-enqueues the item for re-download only if `retry_count <= 5`**  
+  - After each failed attempt, `retry_count` is incremented  
+  - Once the limit is reached, the record is **quarantined for manual inspection**
+
+- **Architectural Rationale:**  
+  This logic was intentionally **separated from the main pipeline** to:
+  - Reduce cognitive and operational complexity  
+  - Prevent infinite retry loops  
+  - Improve debuggability and observability  
+  - Make the core ingestion pipeline simpler and more reliable
+
+This design introduces **bounded, auditable, and safe retries**, aligned with production-grade data engineering practices.
 
 ---
 
@@ -90,61 +129,7 @@ The download orchestration system is optimized for **external API behavior** and
 
 ---
 
-## ⚙️ Data Pipeline Architecture (Clustering + Controlled Retry)
-
-The pipeline is **fully decoupled** into specialized stages using **Amazon SQS** and dedicated Lambda functions.
-
-### 1. Orchestrator Lambda (`data_clustering`)
-
-- **Trigger:** Scheduled execution.
-- **Responsibilities:**
-  - Optimized queries on DynamoDB  
-  - Detection of missing data (*gaps*)  
-- **Output:**  
-  Sends `partition_key` and the list of `dates_to_download` to the SQS queue.
-
----
-
-### 2. Scraper Worker Lambda (`scraper`)
-
-- **Trigger:** SQS message consumption.
-- **Responsibilities:**
-  - Payload deserialization  
-  - External data source request (scraping)  
-  - Final persistence via `PutItem` in DynamoDB  
-
-This model ensures:
-- Automatic horizontal scalability  
-- Fault isolation  
-- High resilience under load spikes
-
----
-
-### 3. Specialized Recheck & Retry Lambda (`retry_recheck`)
-
-To handle persistent data issues without overloading the main pipeline, the architecture includes a **dedicated Lambda function exclusively responsible for controlled reprocessing**.
-
-- **Purpose:**  
-  Periodically re-scan the database to identify records with **`null` values or incomplete fields**.
-
-- **Retry Control:**  
-  Each record contains a `retry_count` attribute.  
-  - The function **re-enqueues the item for re-download only if `retry_count < 5`**  
-  - After each failed attempt, `retry_count` is incremented  
-  - Once the limit is reached, the record is **quarantined for manual inspection**
-
-- **Architectural Rationale:**  
-  This logic was intentionally **separated from the main pipeline** to:
-  - Reduce cognitive and operational complexity  
-  - Prevent infinite retry loops  
-  - Improve debuggability and observability  
-  - Make the core ingestion pipeline simpler and more reliable
-
-This design introduces **bounded, auditable, and safe retries**, aligned with production-grade data engineering practices.
-
----
-
-## 💻 Production-Grade Testing & Isolation
+## 🧪 Production-Grade Testing & Isolation
 
 The project is designed with **testability as a core architectural requirement**.
 
@@ -166,18 +151,41 @@ This enables:
 
 ---
 
-## ✅ Key Architectural Benefits
+## 🔐 Secure CI/CD with OIDC (No Secret Keys)
 
-- Fully **serverless**
-- **Loosely coupled** components
-- **High scalability**
-- **Fault tolerant**
-- **Cost optimized**
-- **Automated testing without real cloud dependencies**
-- **Bounded and auditable retry mechanism**
-- **Secure CI/CD via OIDC (no static credentials)**
-- **Automatic Lambda deployment from GitHub**
-- **Improved maintainability via functional separation**
+This project uses **GitHub Actions with OIDC authentication** to deploy Lambda functions securely to AWS:
+
+- **No AWS access keys are stored in the repository**
+- GitHub Actions assumes an **AWS IAM Role via OIDC**
+- The deployment is **short-lived, scoped, and auditable**
+- Safe for **fully public repositories**
+
+### Automated Lambda Sync
+
+- Each Lambda function in AWS is **automatically matched to a directory in the repository**
+- The **GitHub Actions YAML workflow**:
+  - Detects changes in the repo
+  - Packages the code
+  - Deploys each function to the **Lambda with the same name**
+- This ensures:
+  - Zero manual deployments
+  - Full traceability
+  - Reproducible infrastructure behavior
+  - Production-ready DevOps workflow
+
+This approach follows **cloud security best practices** and eliminates the risks of credential leakage.
+
+---
+
+## 📈 Dashboard dataviz
+
+This project also will have, at it's bottom, a complete visual analysis of it's data, considering aspects of:
+
+- Region
+- Type of Fuel
+- Prices Movement
+
+and more...
 
 ---
 
